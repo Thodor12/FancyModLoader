@@ -8,8 +8,8 @@ pluginManagement {
     }
 
     plugins {
-        id 'net.neoforged.moddev' version '2.0.95'
-        id 'net.neoforged.moddev.repositories' version '2.0.95'
+        id 'net.neoforged.moddev' version '2.0.141'
+        id 'net.neoforged.moddev.repositories' version '2.0.141'
     }
 }
 
@@ -28,11 +28,9 @@ dependencyResolutionManagement {
 
 rootProject.name = 'FancyModLoader'
 
-include 'bootstraplauncher'
 include 'loader'
 include 'earlydisplay'
-include 'junit'
-include 'securejarhandler'
+include 'junit-fml'
 include 'testlib'
 include 'tests'
 enableFeaturePreview "STABLE_CONFIGURATION_CACHE"

@@ -10,6 +10,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import net.neoforged.fml.earlydisplay.DisplayWindow;
 import net.neoforged.fml.loading.FMLConfig;
 import net.neoforged.fml.loading.FMLPaths;
+import net.neoforged.fml.loading.ProgramArgs;
+import net.neoforged.fml.loading.progress.StartupNotificationManager;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL;
 
@@ -22,10 +24,11 @@ public class TestEarlyDisplay {
         FMLConfig.load();
 
         var window = new DisplayWindow();
-        var periodicTick = window.initialize(new String[] {
-                "--fml.mcVersion", "1.21.5",
-                "--fml.neoForgeVersion", "21.5.123-beta"
-        });
+        window.initialize(ProgramArgs.from());
+        Runnable periodicTick = window::periodicTick;
+
+        window.setMinecraftVersion("1.21.5");
+        window.setNeoForgeVersion("21.5.123-beta");
 
         AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -40,6 +43,8 @@ public class TestEarlyDisplay {
             window.close();
             closed.set(true);
         });
+
+        StartupNotificationManager.addProgressBar("Test Bar", 20).setAbsolute(10);
 
         while (!closed.get()) {
             try {

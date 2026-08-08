@@ -49,7 +49,7 @@ public class ModInfo implements IModInfo, IConfigurable {
     private final IConfigurable config;
     private final Optional<URL> modUrl;
 
-    public ModInfo(final ModFileInfo owningFile, final IConfigurable config) {
+    public ModInfo(ModFileInfo owningFile, IConfigurable config) {
         Optional<ModFileInfo> ownFile = Optional.ofNullable(owningFile);
         this.owningFile = owningFile;
         this.config = config;
@@ -179,12 +179,12 @@ public class ModInfo implements IModInfo, IConfigurable {
     }
 
     @Override
-    public <T> Optional<T> getConfigElement(final String... key) {
+    public <T> Optional<T> getConfigElement(String... key) {
         return this.config.getConfigElement(key);
     }
 
     @Override
-    public List<? extends IConfigurable> getConfigList(final String... key) {
+    public List<? extends IConfigurable> getConfigList(String... key) {
         return null;
     }
 
@@ -201,6 +201,11 @@ public class ModInfo implements IModInfo, IConfigurable {
         }
     }
 
+    @Override
+    public String toString() {
+        return modId + " (" + displayName + ") @ " + version;
+    }
+
     class ModVersion implements net.neoforged.neoforgespi.language.IModInfo.ModVersion {
         private IModInfo owner;
         private final String modId;
@@ -211,7 +216,7 @@ public class ModInfo implements IModInfo, IConfigurable {
         private final DependencySide side;
         private Optional<URL> referralUrl;
 
-        public ModVersion(final IModInfo owner, final IConfigurable config) {
+        public ModVersion(IModInfo owner, IConfigurable config) {
             this.owner = owner;
             this.modId = config.<String>getConfigElement("modId")
                     .orElseThrow(() -> new InvalidModFileException("Missing required field modid in dependency", getOwningFile()));
@@ -262,7 +267,7 @@ public class ModInfo implements IModInfo, IConfigurable {
         }
 
         @Override
-        public void setOwner(final IModInfo owner) {
+        public void setOwner(IModInfo owner) {
             this.owner = owner;
         }
 

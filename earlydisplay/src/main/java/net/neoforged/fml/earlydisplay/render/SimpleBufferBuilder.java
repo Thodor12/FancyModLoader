@@ -59,7 +59,7 @@ import org.lwjgl.system.MemoryUtil;
  *
  * @author covers1624
  */
-class SimpleBufferBuilder implements Closeable {
+public class SimpleBufferBuilder implements Closeable {
     private static final MemoryUtil.MemoryAllocator ALLOCATOR = MemoryUtil.getAllocator(false);
 
     private static final int[] VERTEX_ARRAYS = new int[Format.values().length];
@@ -105,6 +105,13 @@ class SimpleBufferBuilder implements Closeable {
         glDeleteBuffers(VERTEX_BUFFERS);
         glDeleteBuffers(elementBuffer);
         glDeleteVertexArrays(VERTEX_ARRAYS);
+
+        // Clear buffer IDs and lengths to allow re-initialization
+        Arrays.fill(VERTEX_ARRAYS, 0);
+        Arrays.fill(VERTEX_BUFFERS, 0);
+        Arrays.fill(VERTEX_BUFFER_LENGTHS, 0);
+        elementBuffer = 0;
+        elementBufferVertexLength = 0;
     }
 
     private static void ensureElementBufferLength(int vertices) {
@@ -113,14 +120,14 @@ class SimpleBufferBuilder implements Closeable {
         }
 
         // treating it as immutable storage, even though it's not
-        final var newElementBuffer = glGenBuffers();
+        var newElementBuffer = glGenBuffers();
         var newElementBufferVertexLength = Math.max(1024, elementBufferVertexLength);
         while (newElementBufferVertexLength < vertices) {
             newElementBufferVertexLength *= 2;
         }
 
-        final var oldIndexCount = elementBufferVertexLength + elementBufferVertexLength / 2;
-        final var newIndexCount = newElementBufferVertexLength + newElementBufferVertexLength / 2;
+        var oldIndexCount = elementBufferVertexLength + elementBufferVertexLength / 2;
+        var newIndexCount = newElementBufferVertexLength + newElementBufferVertexLength / 2;
 
         // allocate new buffer
         GlState.bindElementArrayBuffer(newElementBuffer);
@@ -130,16 +137,16 @@ class SimpleBufferBuilder implements Closeable {
         // mapping avoids creating additional CPU copies of the data
         // unsynchronized is fine because this is a brand-new buffer, and the old contents will be copied in afterward
         // also can invalidate the whole buffer too, similarly because brand new, don't care what was there before
-        final var mappingOffset = oldIndexCount * 4;
-        final var mappingSize = (newIndexCount - oldIndexCount) * 4;
-        final var mappedBuffer = glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, mappingOffset, mappingSize, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+        var mappingOffset = oldIndexCount * 4;
+        var mappingSize = (newIndexCount - oldIndexCount) * 4;
+        var mappedBuffer = glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, mappingOffset, mappingSize, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
 
         if (mappedBuffer == null) {
             throw new NullPointerException("OpenGL buffer mapping failed");
         }
 
-        final int quads = newElementBufferVertexLength / 4;
-        final int oldQuads = elementBufferVertexLength / 4;
+        int quads = newElementBufferVertexLength / 4;
+        int oldQuads = elementBufferVertexLength / 4;
         // generate indices for the extension to the buffer
         for (int i = oldQuads; i < quads; i++) {
             // Quads are a bit different, we need to emit 2 triangles such that
@@ -344,8 +351,8 @@ class SimpleBufferBuilder implements Closeable {
             buffer.limit(index);
 
             // Upload the raw vertex data in dynamic mode.
-            final int vbo = VERTEX_BUFFERS[format.ordinal()];
-            final int vboSize = VERTEX_BUFFER_LENGTHS[format.ordinal()];
+            int vbo = VERTEX_BUFFERS[format.ordinal()];
+            int vboSize = VERTEX_BUFFER_LENGTHS[format.ordinal()];
             GlState.bindArrayBuffer(vbo);
             if (vboSize < index) {
                 // expand buffer, it's not big enough

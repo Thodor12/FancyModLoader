@@ -5,30 +5,38 @@
 
 package net.neoforged.fml.common.asm;
 
-import cpw.mods.modlauncher.serviceapi.ILaunchPluginService;
-import java.util.EnumSet;
+import java.util.Set;
 import net.neoforged.accesstransformer.api.AccessTransformerEngine;
-import org.objectweb.asm.Type;
-import org.objectweb.asm.tree.ClassNode;
+import net.neoforged.neoforgespi.transformation.ClassProcessor;
+import net.neoforged.neoforgespi.transformation.ClassProcessorIds;
+import net.neoforged.neoforgespi.transformation.ProcessorName;
+import org.jetbrains.annotations.ApiStatus;
 
-public class AccessTransformerService implements ILaunchPluginService {
-    public final AccessTransformerEngine engine = AccessTransformerEngine.newEngine();
+@ApiStatus.Internal
+public class AccessTransformerService implements ClassProcessor {
+    private final AccessTransformerEngine engine;
 
-    @Override
-    public String name() {
-        return "accesstransformer";
+    public AccessTransformerService(AccessTransformerEngine engine) {
+        this.engine = engine;
     }
 
     @Override
-    public int processClassWithFlags(final Phase phase, final ClassNode classNode, final Type classType, final String reason) {
-        return engine.transform(classNode, classType) ? ComputeFlags.SIMPLE_REWRITE : ComputeFlags.NO_REWRITE;
+    public ProcessorName name() {
+        return ClassProcessorIds.ACCESS_TRANSFORMERS;
     }
 
-    private static final EnumSet<Phase> YAY = EnumSet.of(Phase.BEFORE);
-    private static final EnumSet<Phase> NAY = EnumSet.noneOf(Phase.class);
+    @Override
+    public Set<ProcessorName> runsBefore() {
+        return Set.of(ClassProcessorIds.MIXIN);
+    }
 
     @Override
-    public EnumSet<Phase> handlesClass(final Type classType, final boolean isEmpty) {
-        return !isEmpty && engine.getTargets().contains(classType) ? YAY : NAY;
+    public ComputeFlags processClass(TransformationContext context) {
+        return engine.transform(context.node(), context.type()) ? ComputeFlags.SIMPLE_REWRITE : ComputeFlags.NO_REWRITE;
+    }
+
+    @Override
+    public boolean handlesClass(SelectionContext context) {
+        return !context.empty() && engine.getTargets().contains(context.type());
     }
 }

@@ -5,8 +5,7 @@
 
 package net.neoforged.fml.earlydisplay.render;
 
-import static org.lwjgl.opengl.GL13C.GL_TEXTURE0;
-
+import com.google.common.collect.Lists;
 import java.util.List;
 import net.neoforged.fml.earlydisplay.theme.Theme;
 import net.neoforged.fml.earlydisplay.theme.ThemeColor;
@@ -17,6 +16,9 @@ public record RenderContext(
         MaterializedTheme theme,
         float availableWidth,
         float availableHeight,
+        int viewportOffsetX,
+        int viewportOffsetY,
+        float viewportScale,
         int animationFrame) {
     public ElementShader bindShader(String shaderId) {
         var shader = theme.getShader(shaderId);
@@ -50,8 +52,8 @@ public record RenderContext(
             float u1,
             float v0,
             float v1) {
-        GlState.activeTexture(GL_TEXTURE0);
         GlState.bindTexture2D(texture.textureId());
+        GlState.bindSampler(0);
 
         var shader = bindShader(Theme.SHADER_GUI);
         shader.setUniform1i(ElementShader.UNIFORM_SAMPLER0, 0);
@@ -77,9 +79,15 @@ public record RenderContext(
         sharedBuffer.draw();
     }
 
+    public void renderTextWithShadow(float x, float y, SimpleFont font, List<SimpleFont.DisplayText> texts) {
+        List<SimpleFont.DisplayText> shadowTexts = Lists.transform(texts, text -> new SimpleFont.DisplayText(text.string(), ThemeColor.scale(ThemeColor.ofArgb(text.colour()), .25F).toArgb()));
+        renderText(x + 2, y + 2, font, shadowTexts);
+        renderText(x, y, font, texts);
+    }
+
     public void renderText(float x, float y, SimpleFont font, List<SimpleFont.DisplayText> texts) {
-        GlState.activeTexture(GL_TEXTURE0);
         GlState.bindTexture2D(font.textureId());
+        GlState.bindSampler(0);
         bindShader(Theme.SHADER_FONT);
         sharedBuffer.begin(SimpleBufferBuilder.Format.POS_TEX_COLOR, SimpleBufferBuilder.Mode.QUADS);
         font.generateVerticesForTexts(x, y, sharedBuffer, texts);
@@ -135,12 +143,35 @@ public record RenderContext(
         blitTexture(sprites.progressBarBackground(), barBounds);
 
         GlState.scissorTest(true);
-        GlState.scissorBox(
+        scissorBox(
                 (int) barBounds.left(),
                 (int) barBounds.top(),
                 (int) (barBounds.width() * fillFactor),
                 (int) barBounds.height());
         blitTexture(sprites.progressBarForeground(), barBounds, foregroundColor);
         GlState.scissorTest(false);
+    }
+
+    public void fillRect(float x, float y, float width, float height, int color) {
+        fillRect(x, y, width, height, color, color);
+    }
+
+    public void fillRect(float x, float y, float width, float height, int colorTop, int colorBottom) {
+        bindShader("color");
+        sharedBuffer.begin(SimpleBufferBuilder.Format.POS_TEX_COLOR, SimpleBufferBuilder.Mode.QUADS);
+        sharedBuffer.pos(x, y).tex(0, 0).colour(colorTop).endVertex();
+        sharedBuffer.pos(x + width, y).tex(0, 0).colour(colorTop).endVertex();
+        sharedBuffer.pos(x, y + height).tex(0, 0).colour(colorBottom).endVertex();
+        sharedBuffer.pos(x + width, y + height).tex(0, 0).colour(colorBottom).endVertex();
+        sharedBuffer.draw();
+    }
+
+    public void scissorBox(int x, int y, int width, int height) {
+        // glScissor applies to the whole window, not just the viewport set via glViewport
+        GlState.scissorBox(
+                (int) (viewportOffsetX + x * viewportScale),
+                (int) (viewportOffsetY + y * viewportScale),
+                (int) (width * viewportScale),
+                (int) (height * viewportScale));
     }
 }

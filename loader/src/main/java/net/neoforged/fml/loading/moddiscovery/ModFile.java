@@ -7,10 +7,8 @@ package net.neoforged.fml.loading.moddiscovery;
 
 import com.google.common.collect.ImmutableMap;
 import com.mojang.logging.LogUtils;
-import cpw.mods.jarhandling.SecureJar;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
+import java.lang.module.ModuleDescriptor;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -20,11 +18,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.jar.Attributes;
-import java.util.jar.Manifest;
 import java.util.stream.Stream;
+import net.neoforged.fml.jarcontents.JarContents;
+import net.neoforged.fml.jarmoduleinfo.JarModuleInfo;
 import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.fml.loading.LogMarkers;
 import net.neoforged.fml.loading.modscan.Scanner;
@@ -44,36 +42,82 @@ import org.slf4j.Logger;
 @ApiStatus.Internal
 public class ModFile implements IModFile {
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final String DEFAULT_ACCESS_TRANSFORMER = "META-INF/accesstransformer.cfg";
 
+    private final String id;
     private final String jarVersion;
-    private final ModFileInfoParser parser;
     private ModFileDiscoveryAttributes discoveryAttributes;
     private Map<String, Object> fileProperties;
     private List<IModLanguageLoader> loaders;
-    private final SecureJar jar;
+    private final JarContents contents;
+    private final JarModuleInfo jarModuleInfo;
+    @Nullable
+    private volatile ModuleDescriptor moduleDescriptor;
     private final Type modFileType;
-    private final Manifest manifest;
-    private IModFileInfo modFileInfo;
+    private final IModFileInfo modFileInfo;
+    private final List<ModFileParser.MixinConfig> mixinConfigs;
+    private final List<String> accessTransformers;
     @Nullable
     private CompletableFuture<ModFileScanData> futureScanResult;
-    private List<ModFileParser.MixinConfig> mixinConfigs;
-    private List<Path> accessTransformers;
 
     public static final Attributes.Name TYPE = new Attributes.Name("FMLModType");
 
-    public ModFile(SecureJar jar, final ModFileInfoParser parser, ModFileDiscoveryAttributes attributes) {
-        this(jar, parser, parseType(jar), attributes);
+    public ModFile(JarContents contents, ModFileInfoParser parser, ModFileDiscoveryAttributes attributes) {
+        this(contents, null, parser, parseType(contents), attributes);
     }
 
-    public ModFile(SecureJar jar, ModFileInfoParser parser, Type type, ModFileDiscoveryAttributes discoveryAttributes) {
-        this.jar = Objects.requireNonNull(jar, "jar");
-        this.parser = Objects.requireNonNull(parser, "parser");
+    public ModFile(JarContents contents, @Nullable JarModuleInfo metadata, final ModFileInfoParser parser, ModFileDiscoveryAttributes attributes) {
+        this(contents, metadata, parser, parseType(contents), attributes);
+    }
+
+    public ModFile(JarContents contents, @Nullable JarModuleInfo metadata, ModFileInfoParser parser, Type type, ModFileDiscoveryAttributes discoveryAttributes) {
+        this.contents = Objects.requireNonNull(contents, "jar");
         this.discoveryAttributes = Objects.requireNonNull(discoveryAttributes, "discoveryAttributes");
 
-        manifest = this.jar.moduleDataProvider().getManifest();
         modFileType = Objects.requireNonNull(type, "type");
-        jarVersion = Optional.ofNullable(manifest.getMainAttributes().getValue(Attributes.Name.IMPLEMENTATION_VERSION)).orElse("0.0NONE");
-        this.modFileInfo = ModFileParser.readModList(this, this.parser);
+        jarVersion = Optional.ofNullable(getContents().getManifest().getMainAttributes().getValue(Attributes.Name.IMPLEMENTATION_VERSION)).orElse("0.0NONE");
+        this.modFileInfo = ModFileParser.readModList(this, Objects.requireNonNull(parser, "parser"));
+        jarModuleInfo = metadata != null ? metadata : JarModuleInfo.from(contents);
+        if (modFileInfo != null && !modFileInfo.getMods().isEmpty()) {
+            this.id = modFileInfo.getMods().getFirst().getModId();
+        } else {
+            this.id = jarModuleInfo.name();
+        }
+
+        if (this.modFileInfo != null) {
+            LOGGER.debug(LogMarkers.LOADING, "Loading mod file {} with languages {}", this.getFilePath(), this.modFileInfo.requiredLanguageLoaders());
+            this.mixinConfigs = ModFileParser.getMixinConfigs(this.modFileInfo);
+            this.mixinConfigs.forEach(mc -> LOGGER.debug(LogMarkers.LOADING, "Found mixin config {}", mc));
+            this.accessTransformers = ModFileParser.getAccessTransformers(this.modFileInfo)
+                    .map(list -> list.stream().filter(path -> {
+                        if (!getContents().containsFile(path)) {
+                            LOGGER.error(LogMarkers.LOADING, "Access transformer file {} provided by mod {} does not exist!", path, id);
+                            return false;
+                        }
+                        return true;
+                    }))
+                    .orElseGet(() -> {
+                        if (getContents().containsFile(DEFAULT_ACCESS_TRANSFORMER)) {
+                            return Stream.of(DEFAULT_ACCESS_TRANSFORMER);
+                        } else {
+                            return Stream.empty();
+                        }
+                    })
+                    .toList();
+        } else {
+            this.mixinConfigs = List.of();
+            this.accessTransformers = List.of();
+        }
+    }
+
+    @Override
+    public String getId() {
+        return id;
+    }
+
+    @Override
+    public JarContents getContents() {
+        return contents;
     }
 
     @Override
@@ -92,12 +136,7 @@ public class ModFile implements IModFile {
 
     @Override
     public Path getFilePath() {
-        return jar.getPrimaryPath();
-    }
-
-    @Override
-    public SecureJar getSecureJar() {
-        return this.jar;
+        return getContents().getPrimaryPath();
     }
 
     @Override
@@ -105,41 +144,12 @@ public class ModFile implements IModFile {
         return modFileInfo.getMods();
     }
 
-    public List<Path> getAccessTransformers() {
+    public List<String> getAccessTransformers() {
         return accessTransformers;
-    }
-
-    public boolean identifyMods() {
-        this.modFileInfo = ModFileParser.readModList(this, this.parser);
-        if (this.modFileInfo == null) return this.getType() != Type.MOD;
-        LOGGER.debug(LogMarkers.LOADING, "Loading mod file {} with languages {}", this.getFilePath(), this.modFileInfo.requiredLanguageLoaders());
-        this.mixinConfigs = ModFileParser.getMixinConfigs(this.modFileInfo);
-        this.mixinConfigs.forEach(mc -> LOGGER.debug(LogMarkers.LOADING, "Found mixin config {}", mc));
-        this.accessTransformers = ModFileParser.getAccessTransformers(this.modFileInfo)
-                .map(list -> list.stream().map(this::findResource).filter(path -> {
-                    if (Files.notExists(path)) {
-                        LOGGER.error(LogMarkers.LOADING, "Access transformer file {} provided by mod {} does not exist!", path, modFileInfo.moduleName());
-                        return false;
-                    }
-                    return true;
-                }))
-                .orElseGet(() -> Stream.of(findResource("META-INF", "accesstransformer.cfg"))
-                        .filter(Files::exists))
-                .toList();
-        return true;
     }
 
     public List<ModFileParser.MixinConfig> getMixinConfigs() {
         return mixinConfigs;
-    }
-
-    public void scanFile(Consumer<Path> pathConsumer) {
-        var rootPath = getSecureJar().getRootPath();
-        try (Stream<Path> files = Files.find(rootPath, Integer.MAX_VALUE, (p, a) -> p.getNameCount() > 0 && p.getFileName().toString().endsWith(".class"))) {
-            files.forEach(pathConsumer);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to scan " + rootPath, e);
-        }
     }
 
     public CompletionStage<ModFileScanData> startScan(Executor executor) {
@@ -170,14 +180,6 @@ public class ModFile implements IModFile {
         this.fileProperties = fileProperties;
     }
 
-    @Override
-    public Path findResource(String... path) {
-        if (path.length < 1) {
-            throw new IllegalArgumentException("Missing path");
-        }
-        return getSecureJar().getPath(String.join("/", path));
-    }
-
     public void identifyLanguage() {
         this.loaders = this.modFileInfo.requiredLanguageLoaders().stream()
                 .map(spec -> FMLLoader.getLanguageLoadingProvider().findLanguage(this, spec.languageName(), spec.acceptedVersions()))
@@ -187,9 +189,9 @@ public class ModFile implements IModFile {
     @Override
     public String toString() {
         if (discoveryAttributes.parent() != null) {
-            return "Nested Mod File " + this.jar.getPrimaryPath() + " in " + discoveryAttributes.parent();
+            return discoveryAttributes.parent() + " > " + contents;
         } else {
-            return "Mod File: " + this.jar.getPrimaryPath();
+            return contents.toString();
         }
     }
 
@@ -216,9 +218,39 @@ public class ModFile implements IModFile {
         return new DefaultArtifactVersion(this.jarVersion);
     }
 
-    private static Type parseType(final SecureJar jar) {
-        final Manifest m = jar.moduleDataProvider().getManifest();
-        final Optional<String> value = Optional.ofNullable(m.getMainAttributes().getValue(TYPE));
-        return value.map(Type::valueOf).orElse(Type.MOD);
+    private static Type parseType(JarContents contents) {
+        var value = contents.getManifest().getMainAttributes().getValue(TYPE);
+        return value != null ? Type.valueOf(value) : Type.MOD;
+    }
+
+    /**
+     * Computing the module descriptor for the first time can be
+     * expensive, so this should be called once in parallel for all content.
+     */
+    public ModuleDescriptor getModuleDescriptor() {
+        var result = moduleDescriptor;
+        if (result == null) {
+            synchronized (this) {
+                result = moduleDescriptor;
+                if (result == null) {
+                    moduleDescriptor = result = jarModuleInfo.createDescriptor(contents);
+                }
+            }
+        }
+        return result;
+    }
+
+    public void close() {
+        // Cancel background scanning to avoid "closed zip file" errors from access to the jar file we're about to close
+        if (futureScanResult != null) {
+            futureScanResult.cancel(true);
+            futureScanResult = null;
+        }
+
+        try {
+            contents.close();
+        } catch (IOException e) {
+            LOGGER.error("Failed to close mod file {}", this, e);
+        }
     }
 }

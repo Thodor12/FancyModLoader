@@ -31,6 +31,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import net.neoforged.fml.earlydisplay.render.elements.ImageElement;
 import net.neoforged.fml.earlydisplay.render.elements.LabelElement;
 import net.neoforged.fml.earlydisplay.render.elements.MojangLogoElement;
@@ -43,6 +44,7 @@ import net.neoforged.fml.earlydisplay.theme.elements.ThemeElement;
 import net.neoforged.fml.earlydisplay.theme.elements.ThemeImageElement;
 import net.neoforged.fml.earlydisplay.theme.elements.ThemeLabelElement;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL32C;
@@ -53,11 +55,11 @@ public class LoadingScreenRenderer implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(LoadingScreenRenderer.class);
     public static final int LAYOUT_WIDTH = 854;
     public static final int LAYOUT_HEIGHT = 480;
+    @VisibleForTesting
+    public static volatile boolean rendered = false;
 
     private final long glfwWindow;
     private final MaterializedTheme theme;
-    private final String mcVersion;
-    private final String neoForgeVersion;
 
     private static final long MINFRAMETIME = TimeUnit.MILLISECONDS.toNanos(10); // This is the FPS cap on the window - note animation is capped at 20FPS via the tickTimer
 
@@ -75,6 +77,9 @@ public class LoadingScreenRenderer implements AutoCloseable {
 
     private final SimpleBufferBuilder buffer = new SimpleBufferBuilder("shared", 8192);
 
+    private final Supplier<String> minecraftVersion;
+    private final Supplier<String> neoForgeVersion;
+
     /**
      * Render initialization methods called by the Render Thread.
      * It compiles the fragment and vertex shaders for rendering text with STB, and sets up basic render framework.
@@ -85,10 +90,10 @@ public class LoadingScreenRenderer implements AutoCloseable {
             long glfwWindow,
             Theme theme,
             @Nullable Path externalThemeDirectory,
-            String mcVersion,
-            String neoForgeVersion) {
+            Supplier<String> minecraftVersion,
+            Supplier<String> neoForgeVersion) {
         this.glfwWindow = glfwWindow;
-        this.mcVersion = mcVersion;
+        this.minecraftVersion = minecraftVersion;
         this.neoForgeVersion = neoForgeVersion;
 
         // This thread owns the GL render context now. We should make a note of that.
@@ -124,6 +129,9 @@ public class LoadingScreenRenderer implements AutoCloseable {
         var elements = new ArrayList<RenderElement>();
 
         var loadingScreen = theme.theme().loadingScreen();
+        if (loadingScreen.background() != null && loadingScreen.background().visible()) {
+            elements.add(new ImageElement(loadingScreen.background(), theme));
+        }
         if (loadingScreen.performance().visible()) {
             elements.add(new PerformanceElement(loadingScreen.performance(), theme));
         }
@@ -156,8 +164,8 @@ public class LoadingScreenRenderer implements AutoCloseable {
             case ThemeLabelElement labelElement -> new LabelElement(
                     labelElement,
                     theme,
-                    Map.of(
-                            "version", mcVersion + "-" + neoForgeVersion.split("-")[0]));
+                    () -> Map.of(
+                            "version", getVersionString()));
 
             default -> throw new IllegalStateException("Unexpected theme element " + element + " of type " + element.getClass());
         };
@@ -165,12 +173,38 @@ public class LoadingScreenRenderer implements AutoCloseable {
         return renderElement;
     }
 
+    private String getVersionString() {
+        var result = new StringBuilder();
+        var minecraftVersion = this.minecraftVersion.get();
+        if (minecraftVersion != null) {
+            result.append(minecraftVersion);
+        }
+        var neoForgeVersion = this.neoForgeVersion.get();
+        if (neoForgeVersion != null) {
+            if (!result.isEmpty()) {
+                result.append("-");
+            }
+            result.append(neoForgeVersion.split("-")[0]);
+        }
+        return result.toString();
+    }
+
     public void stopAutomaticRendering() throws TimeoutException, InterruptedException {
-        this.automaticRendering.cancel(false);
+        if (this.automaticRendering.isCancelled()) {
+            // Auto-render was already canceled, likely by window takeover, and we got here from the early error display triggering after window takeover
+            return;
+        }
+
+        // We must acquire the render lock to ensure we cancel the future when the background thread is not currently
+        // using the GL context. Otherwise, a race condition may occur when we cancel the future before the
+        // glfwMakeContextCurrent(0) call at the end of renderToScreen. If the BG thread reads that the future is canceled,
+        // it skips releasing the context. The main thread then crashes when it attempts to take ownership of the context.
+        // Since renderToScreen bails immediately without running GL calls if it fails to acquire the lock,
+        // we can safely assume the above won't happen once we have acquired it.
         if (!renderLock.tryAcquire(5, TimeUnit.SECONDS)) {
             throw new TimeoutException();
         }
-        // we don't want the lock, just making sure it's back on the main thread
+        this.automaticRendering.cancel(false);
         renderLock.release();
     }
 
@@ -212,9 +246,10 @@ public class LoadingScreenRenderer implements AutoCloseable {
         } catch (Throwable t) {
             LOGGER.error("Unexpected error while rendering the loading screen", t);
         } finally {
-            if (this.automaticRendering != null)
+            if (!this.automaticRendering.isCancelled())
                 glfwMakeContextCurrent(0); // we release the gl context IF we're running off the main thread
             renderLock.release();
+            rendered = true;
         }
     }
 
@@ -228,14 +263,23 @@ public class LoadingScreenRenderer implements AutoCloseable {
         // Fit the layout rectangle into the screen while maintaining aspect ratio
         var desiredAspectRatio = LAYOUT_WIDTH / (float) LAYOUT_HEIGHT;
         var actualAspectRatio = framebuffer.width() / (float) framebuffer.height();
+        int offsetX;
+        int offsetY;
+        float scale;
         if (actualAspectRatio > desiredAspectRatio) {
             // This means we are wider than the desired aspect ratio, and have to center horizontally
             var actualWidth = desiredAspectRatio * framebuffer.height();
-            GlState.viewport((int) (framebuffer.width() - actualWidth) / 2, 0, (int) actualWidth, framebuffer.height());
+            offsetX = (int) (framebuffer.width() - actualWidth) / 2;
+            offsetY = 0;
+            GlState.viewport(offsetX, 0, (int) actualWidth, framebuffer.height());
+            scale = (float) framebuffer.height() / LAYOUT_HEIGHT;
         } else {
             // This means we are taller than the desired aspect ratio, and have to center vertically
             var actualHeight = framebuffer.width() / desiredAspectRatio;
-            GlState.viewport(0, (int) (framebuffer.height() - actualHeight) / 2, framebuffer.width(), (int) actualHeight);
+            offsetX = 0;
+            offsetY = (int) (framebuffer.height() - actualHeight) / 2;
+            GlState.viewport(0, offsetY, framebuffer.width(), (int) actualHeight);
+            scale = (float) framebuffer.width() / LAYOUT_WIDTH;
         }
 
         // Clear the screen to our color
@@ -252,7 +296,7 @@ public class LoadingScreenRenderer implements AutoCloseable {
             }
         }
 
-        var context = new RenderContext(buffer, theme, LAYOUT_WIDTH, LAYOUT_HEIGHT, animationFrame);
+        var context = new RenderContext(buffer, theme, LAYOUT_WIDTH, LAYOUT_HEIGHT, offsetX, offsetY, scale, animationFrame);
 
         for (var element : this.elements) {
             element.render(context);
