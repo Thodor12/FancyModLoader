@@ -615,22 +615,22 @@ class FMLLoaderTest extends LauncherTest {
             installation.setupProductionClient();
 
             installation.writeModJar("test.jar", new IdentifiableContent("MODS_TOML", "META-INF/neoforge.mods.toml", """
-                modLoader="javafml"
-                loaderVersion="[3,)"
-                license="CC0"
-                [[mods]]
-                modId="testproject"
-                version="0.0.0"
-                displayName="Test Project"
-                description='''A test project.'''
-                [[dependencies.testproject]]
-                modId="badmod"
-                type="incompatible"
-                reason="badmod patches testproject internals and breaks compatibility"
-                versionRange="[1,)"
-                ordering="NONE"
-                side="BOTH"
-                """.getBytes()));
+                    modLoader="javafml"
+                    loaderVersion="[3,)"
+                    license="CC0"
+                    [[mods]]
+                    modId="testproject"
+                    version="0.0.0"
+                    displayName="Test Project"
+                    description='''A test project.'''
+                    [[dependencies.testproject]]
+                    modId="badmod"
+                    type="incompatible"
+                    reason="badmod patches testproject internals and breaks compatibility"
+                    versionRange="[1,)"
+                    ordering="NONE"
+                    side="BOTH"
+                    """.getBytes()));
             installation.buildModJar("badmod.jar").withMod("badmod", "1.0").build();
 
             var e = assertThrows(ModLoadingException.class, () -> launchAndLoad("forgeclient"));
@@ -645,21 +645,21 @@ class FMLLoaderTest extends LauncherTest {
             installation.setupProductionClient();
 
             installation.writeModJar("test.jar", new IdentifiableContent("MODS_TOML", "META-INF/neoforge.mods.toml", """
-                modLoader="javafml"
-                loaderVersion="[3,)"
-                license="CC0"
-                [[mods]]
-                modId="testproject"
-                version="0.0.0"
-                displayName="Test Project"
-                description='''A test project.'''
-                [[dependencies.testproject]]
-                modId="badmod"
-                type="incompatible"
-                versionRange="[1,)"
-                ordering="NONE"
-                side="BOTH"
-                """.getBytes()));
+                    modLoader="javafml"
+                    loaderVersion="[3,)"
+                    license="CC0"
+                    [[mods]]
+                    modId="testproject"
+                    version="0.0.0"
+                    displayName="Test Project"
+                    description='''A test project.'''
+                    [[dependencies.testproject]]
+                    modId="badmod"
+                    type="incompatible"
+                    versionRange="[1,)"
+                    ordering="NONE"
+                    side="BOTH"
+                    """.getBytes()));
             installation.buildModJar("badmod.jar").withMod("badmod", "1.0").build();
 
             var e = assertThrows(ModLoadingException.class, () -> launchAndLoad("forgeclient"));
@@ -674,22 +674,22 @@ class FMLLoaderTest extends LauncherTest {
             installation.setupProductionClient();
 
             installation.writeModJar("test.jar", new IdentifiableContent("MODS_TOML", "META-INF/neoforge.mods.toml", """
-                modLoader="javafml"
-                loaderVersion="[3,)"
-                license="CC0"
-                [[mods]]
-                modId="testproject"
-                version="0.0.0"
-                displayName="Test Project"
-                description='''A test project.'''
-                [[dependencies.testproject]]
-                modId="badmod"
-                type="discouraged"
-                reason="badmod patches testproject internals and may cause issues"
-                versionRange="[1,)"
-                ordering="NONE"
-                side="BOTH"
-                """.getBytes()));
+                    modLoader="javafml"
+                    loaderVersion="[3,)"
+                    license="CC0"
+                    [[mods]]
+                    modId="testproject"
+                    version="0.0.0"
+                    displayName="Test Project"
+                    description='''A test project.'''
+                    [[dependencies.testproject]]
+                    modId="badmod"
+                    type="discouraged"
+                    reason="badmod patches testproject internals and may cause issues"
+                    versionRange="[1,)"
+                    ordering="NONE"
+                    side="BOTH"
+                    """.getBytes()));
             installation.buildModJar("badmod.jar").withMod("badmod", "1.0").build();
 
             var result = launchAndLoad("forgeclient");
